@@ -1,38 +1,122 @@
 {% extends 'Researchers/base.html' %}
 {% block content %}
 
-<!-- Set background image (adjust image path as needed) -->
+<!-- Set background image (adjust the image path if needed) -->
 <style>
 body {
   background: url('/static/images/market-bg.jpg') no-repeat center center fixed;
   background-size: cover;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+.center-bar-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80vh;a
+}
+.blank-bar {
+  width: 400px;
+  height: 60px;
+  background: rgba(0,0,0,0.55);
+  border-radius: 20px;
+  box-shadow: 0 4px 30px rgba(0,0,0,0.2);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.blank-bar:hover {
+  background: rgba(0,0,0,0.75);
+}
+.modal-bg {
+  display: none;
+  position: fixed;
+  left: 0; top: 0; width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.6);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  background: #222;
+  color: #fff;
+  padding: 2em 2em 1.5em 2em;
+  border-radius: 16px;
+  min-width: 320px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.modal input[type="text"] {
+  padding: 10px;
+  border-radius: 6px;
+  border: none;
+  width: 200px;
+  margin-bottom: 1em;
+  font-size: 1.1em;
+}
+.modal button {
+  padding: 8px 18px;
+  border-radius: 6px;
+  border: none;
+  background: #19b5fe;
+  color: #fff;
+  font-size: 1.1em;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.close-btn {
+  background: transparent;
+  color: #fff;
+  border: none;
+  font-size: 1.3em;
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  cursor: pointer;
 }
 </style>
 
-<div style="display: flex; align-items: center; justify-content: center; min-height: 80vh;">
-  <div style="background: rgba(0,0,0,0.7); color: #fff; border-radius: 10px; padding: 2rem 3rem; box-shadow: 0 4px 30px rgba(0,0,0,0.2);">
-    <h2>Select Symbol</h2>
-    <form id="symbolForm">
-      <select name="symbol" id="symbolSelect" required>
-        <option value="">Choose a symbol</option>
-        <!-- Fill this list with all your stocks, indexes, currencies, etc. -->
-        <option value="AAPL">AAPL</option>
-        <option value="NIFTY">NIFTY</option>
-        <option value="USDINR">USDINR</option>
-        <!-- Add more options as needed -->
-      </select>
-      <button type="submit">Open Backtest & Chart</button>
-    </form>
+<div class="center-bar-container">
+  <div class="blank-bar" id="openModal"></div>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" style="position: relative;">
+    <button class="close-btn" id="closeModal">&times;</button>
+    <div style="margin-bottom: 10px; font-size: 1.2em;">Search Symbol</div>
+    <input type="text" id="symbolInput" placeholder="Type symbol (e.g. AAPL)" autofocus autocomplete="off"/>
+    <button onclick="openBacktest()">Open Backtest & Chart</button>
   </div>
 </div>
+
 <script>
-  document.getElementById('symbolForm').onsubmit = function(e) {
-    e.preventDefault();
-    var symbol = document.getElementById('symbolSelect').value;
-    if(symbol) {
-      window.location.href = '/backtest/?symbol=' + encodeURIComponent(symbol);
-    }
-  };
+document.getElementById('openModal').onclick = function() {
+  document.getElementById('modalBg').style.display = 'flex';
+  setTimeout(function() {
+    document.getElementById('symbolInput').focus();
+  }, 100);
+};
+document.getElementById('closeModal').onclick = function() {
+  document.getElementById('modalBg').style.display = 'none';
+};
+function openBacktest() {
+  var symbol = document.getElementById('symbolInput').value.trim();
+  if(symbol) {
+    // Open new window with backtest for the symbol
+    window.open('/backtest/?symbol=' + encodeURIComponent(symbol), '_blank');
+    document.getElementById('modalBg').style.display = 'none';
+    document.getElementById('symbolInput').value = '';
+  } else {
+    alert('Please enter a symbol');
+  }
+}
+document.getElementById('symbolInput').addEventListener('keydown', function(e) {
+  if(e.key === 'Enter') {
+    openBacktest();
+  }
+});
 </script>
 
 {% endblock %}
