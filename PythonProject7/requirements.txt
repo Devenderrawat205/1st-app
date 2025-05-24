@@ -1,0 +1,29 @@
+# requirements.txt
+
+# --- Core Python & Data Handling ---
+python-dateutil~=2.9.0.post0
+pandas~=2.2.3
+numpy~=2.2.5
+
+# --- Web Framework ---
+Django~=5.0 # Or latest stable, e.g., 4.2 for LTS
+
+# --- Financial Data & Backtesting ---
+yfinance~=0.2.61
+backtrader~=1.9.78.123
+TA-Lib # Python wrapper, will be installed after C library
+
+# --- Charting (Plotly for rendering in Django templates) ---
+plotly~=6.1.0
+
+# --- Data Analysis & Reporting ---
+QuantStats~=0.0.64
+openpyxl # For exporting to .xlsx Excel files
+
+# --- (Optional but Recommended for Django Later) ---
+# celery~=5.3
+# redis~=5.0
+# djangorestframework~=3.14
+# python-dotenv~=1.0
+# gunicorn # For Linux/macOS deployment
+# waitress # For Windows deployment

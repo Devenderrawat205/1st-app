@@ -1,0 +1,253 @@
+{% extends 'Researchers/base.html' %}
+
+{% block title %}
+    {% if stock %}{{ stock.symbol }} Chart{% else %}Stock Chart{% endif %} - Trading App
+{% endblock %}
+
+{% block content %}
+    <style>
+        .chart-controls { margin-bottom: 20px; padding: 10px; background-color: #f8f9fa; border: 1px solid #eee; border-radius: 4px; }
+        .chart-controls form > div { margin-bottom: 10px; }
+        .chart-controls label { margin-right: 5px; display: inline-block; min-width: 120px; }
+        .chart-controls input[type="number"] { width: 60px; }
+        .chart-controls input[type="checkbox"] { margin-right: 15px; }
+        .chart-controls button { padding: 5px 10px; }
+        .draw-form { margin: 10px 0; }
+        .error { color: red; }
+        .loading { color: blue; display: none; }
+    </style>
+
+    <h1>
+        {% if stock %}{{ stock.name }} ({{ stock.symbol }}) Chart{% else %}Stock Chart{% endif %}
+    </h1>
+
+    <div class="chart-controls">
+        <!-- Indicator form with proper action -->
+        <form id="indicator-form" action="{% url 'researchers:update_indicator' %}">
+            <div>
+                <label for="id_interval">Timeframe:</label>
+                <select name="interval" id="id_interval">
+                    {% for val, display in timeframe_choices %}
+                        <option value="{{ val }}" {% if selected_interval == val %}selected{% endif %}>{{ display }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <hr>
+            <div>
+                <input type="checkbox" name="sma" id="id_show_sma" value="true" {% if show_sma %}checked{% endif %}>
+                <label for="id_show_sma">Show SMA:</label>
+                <input type="number" name="sma_period" value="{{ sma_period_chart|default:20 }}" id="id_sma_period" min="1"> (Period)
+            </div>
+            <div>
+                <input type="checkbox" name="rsi" id="id_show_rsi" value="true" {% if show_rsi %}checked{% endif %}>
+                <label for="id_show_rsi">Show RSI:</label>
+                <input type="number" name="rsi_period" value="{{ rsi_period_chart|default:14 }}" id="id_rsi_period_c" min="1"> (Period)
+            </div>
+            <div>
+                <input type="checkbox" name="bbands" id="id_show_bbands" value="true" {% if show_bbands %}checked{% endif %}>
+                <label for="id_show_bbands">Show Bollinger Bands:</label>
+                <input type="number" name="bbands_period" value="{{ bbands_period_chart|default:20 }}" id="id_bbands_period_c" min="1"> (Period)
+                <input type="number" name="bbands_dev" step="0.1" value="{{ bbands_dev_chart|default:2.0 }}" id="id_bbands_dev_c" min="0.1"> (StdDev)
+            </div>
+            <button type="submit">Update Indicators</button>
+        </form>
+        <button id="toggle-theme">Toggle Dark Theme</button>
+        <button id="export-png">Export as PNG</button>
+    </div>
+
+    <div class="draw-form">
+        <!-- Drawing form with client-side validation -->
+        <form id="draw-line">
+            <label>Start Date: <input type="date" name="start_date" required></label>
+            <label>Start Price: <input type="number" name="start_price" step="0.01" min="0" required></label>
+            <label>End Date: <input type="date" name="end_date" required></label>
+            <label>End Price: <input type="number" name="end_price" step="0.01" min="0" required></label>
+            <button type="submit">Draw Line</button>
+        </form>
+    </div>
+
+    {% if error_message %}
+        <p class="error">{{ error_message }}</p>
+    {% endif %}
+
+    <p class="error" id="client-error" style="display: none;"></p>
+    <p class="loading" id="loading">Loading...</p>
+
+    {% if plot_div %}
+        <div id="chart-container"></div>
+    {% elif not error_message and not stock %}
+        <p>Select a stock to view its chart.</p>
+    {% elif not error_message and stock and not plot_div %}
+        <p>No chart data to display for {{ stock.symbol }}. Try different parameters or check data source.</p>
+    {% endif %}
+
+    <p><a href="{% url 'stock_list' %}">Back to Stock List</a></p>
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        // Helper to show/hide loading and error messages
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+        function showError(message) {
+            const errorEl = document.getElementById('client-error');
+            errorEl.textContent = message;
+            errorEl.style.display = message ? 'block' : 'none';
+        }
+
+        // Get CSRF token for POST requests
+        function getCsrfToken() {
+            const cookie = document.cookie.match(/csrftoken=([^;]+)/);
+            return cookie ? cookie[1] : null;
+        }
+
+        // Initialize chart
+        {% if plot_div %}
+            try {
+                const plotData = {{ plot_div | safe }};
+                Plotly.newPlot('chart-container', plotData.data, plotData.layout);
+
+                // Load existing annotations
+                const annotations = {{ request.session.annotations | default:'[]' | safe }};
+                annotations.forEach(anno => {
+                    Plotly.addTraces('chart-container', {
+                        x: [anno.x0, anno.x1],
+                        y: [anno.y0, anno.y1],
+                        type: 'scatter',
+                        mode: 'lines',
+                        line: anno.line,
+                        name: 'Trend Line'
+                    });
+                });
+            } catch (e) {
+                showError('Error rendering chart: ' + e.message);
+            }
+        {% endif %}
+
+        // Initialize theme from localStorage
+        const savedTheme = localStorage.getItem('chartTheme') || 'plotly_white';
+        const themeButton = document.getElementById('toggle-theme');
+        themeButton.textContent = savedTheme === 'plotly_white' ? 'Toggle Dark Theme' : 'Toggle Light Theme';
+        if (plotData) {
+            Plotly.relayout('chart-container', { template: savedTheme });
+        }
+
+        // Dynamic indicator updates
+        document.getElementById('indicator-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            showLoading(true);
+            showError('');
+
+            const formData = new FormData(e.target);
+            formData.append('symbol', '{{ stock.symbol }}');
+            const params = new URLSearchParams(formData).toString();
+            fetch('{% url "update_indicator" %}?' + params)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    const updates = { data: [], layout: {} };
+                    const showVolume = {{ show_volume | default:'true' | lower }};
+                    const rsiYIndex = showVolume === 'true' ? 3 : 2;
+
+                    if (data.sma_data) {
+                        updates.data.push({
+                            x: data.sma_data.map(d => d.x),
+                            y: data.sma_data.map(d => d.y),
+                            type: 'scatter',
+                            mode: 'lines',
+                            name: 'SMA',
+                            line: { color: 'orange', width: 1.5 }
+                        });
+                    }
+                    if (data.rsi_data) {
+                        updates.data.push({
+                            x: data.rsi_data.map(d => d.x),
+                            y: data.rsi_data.map(d => d.y),
+                            type: 'scatter',
+                            mode: 'lines',
+                            name: 'RSI',
+                            line: { color: 'blue', width: 1.5 },
+                            yaxis: 'y' + rsiYIndex
+                        });
+                    }
+                    if (data.bbands_data) {
+                        updates.data.push(
+                            { x: data.bbands_data.upper.map(d => d.x), y: data.bbands_data.upper.map(d => d.y), type: 'scatter', mode: 'lines', name: 'BB Upper', line: { color: 'rgba(180,180,180,0.5)', width: 0.7 } },
+                            { x: data.bbands_data.middle.map(d => d.x), y: data.bbands_data.middle.map(d => d.y), type: 'scatter', mode: 'lines', name: 'BB Middle', line: { color: 'rgba(180,180,180,0.8)', width: 1, dash: 'dot' } },
+                            { x: data.bbands_data.lower.map(d => d.x), y: data.bbands_data.lower.map(d => d.y), type: 'scatter', mode: 'lines', name: 'BB Lower', line: { color: 'rgba(180,180,180,0.5)', width: 0.7 } }
+                        );
+                    }
+                    Plotly.update('chart-container', updates.data, updates.layout);
+                })
+                .catch(err => showError('Failed to update indicators: ' + err.message))
+                .finally(() => showLoading(false));
+        });
+
+        // Theme toggling with persistence
+        document.getElementById('toggle-theme').addEventListener('click', () => {
+            const currentTheme = localStorage.getItem('chartTheme') || 'plotly_white';
+            const newTheme = currentTheme === 'plotly_white' ? 'plotly_dark' : 'plotly_white';
+            Plotly.relayout('chart-container', { template: newTheme });
+            localStorage.setItem('chartTheme', newTheme);
+            themeButton.textContent = newTheme === 'plotly_white' ? 'Toggle Dark Theme' : 'Toggle Light Theme';
+        });
+
+        // Export as PNG
+        document.getElementById('export-png').addEventListener('click', () => {
+            Plotly.downloadImage('chart-container', { format: 'png', filename: '{{ stock.symbol }}_chart' });
+        });
+
+        // Draw trend lines with validation and CSRF token
+        document.getElementById('draw-line').addEventListener('submit', (e) => {
+            e.preventDefault();
+            showLoading(true);
+            showError('');
+
+            const formData = new FormData(e.target);
+            const startDate = formData.get('start_date');
+            const startPrice = parseFloat(formData.get('start_price'));
+            const endDate = formData.get('end_date');
+            const endPrice = parseFloat(formData.get('end_price'));
+
+            // Client-side validation
+            if (!startDate || !endDate || isNaN(startPrice) || isNaN(endPrice)) {
+                showError('Please enter valid dates and prices.');
+                showLoading(false);
+                return;
+            }
+
+            fetch('{% url "save_drawing" %}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify({
+                    start_date: startDate,
+                    start_price: startPrice,
+                    end_date: endDate,
+                    end_price: endPrice
+                })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        Plotly.addTraces('chart-container', {
+                            x: [startDate, endDate],
+                            y: [startPrice, endPrice],
+                            type: 'scatter',
+                            mode: 'lines',
+                            line: { color: 'blue', width: 2 },
+                            name: 'Trend Line'
+                        });
+                    } else {
+                        throw new Error(data.error || 'Unknown error');
+                    }
+                })
+                .catch(err => showError('Failed to draw line: ' + err.message))
+                .finally(() => showLoading(false));
+        });
+    </script>
+{% endblock %}

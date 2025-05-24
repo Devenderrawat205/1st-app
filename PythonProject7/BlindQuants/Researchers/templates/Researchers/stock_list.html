@@ -1,0 +1,32 @@
+{% extends 'Researchers/base.html' %}
+
+{% block title %}Stock List - BlindQuants{% endblock %}
+
+{% block content %}
+    <h1>Stock List</h1>
+    <p>{{ message }}</p>
+    {% if stocks %}
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Name</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stock in stocks %}
+                    <tr>
+                        <td>{{ stock.symbol }}</td>
+                        <td>{{ stock.name }}</td>
+                        <td>
+                            <a href="{% url 'researchers:stock_chart' stock_symbol=stock.symbol %}" class="btn btn-primary btn-sm">View Chart</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No stocks available.</p>
+    {% endif %}
+{% endblock %}
