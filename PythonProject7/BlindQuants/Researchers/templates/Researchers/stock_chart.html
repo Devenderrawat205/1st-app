@@ -140,7 +140,7 @@
 
             const formData = new FormData(e.target);
             formData.append('symbol', '{{ stock.symbol }}');
-            const params = new URLSearchParams(formData).toString();
+            const params = new SearchParams(formData).toString();
             fetch('{% url "researchers:update_indicator" %}?' + params)
                 .then(response => response.json())
                 .then(data => {
@@ -218,7 +218,7 @@
                 return;
             }
 
-            fetch('{% url "save_drawing" %}', {
+            fetch('{% url "researchers:save_drawing" %}', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
