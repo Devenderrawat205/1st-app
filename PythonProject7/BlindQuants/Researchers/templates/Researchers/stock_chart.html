@@ -141,7 +141,7 @@
             const formData = new FormData(e.target);
             formData.append('symbol', '{{ stock.symbol }}');
             const params = new URLSearchParams(formData).toString();
-            fetch('{% url "update_indicator" %}?' + params)
+            fetch('{% url "researchers:update_indicator" %}?' + params)
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
