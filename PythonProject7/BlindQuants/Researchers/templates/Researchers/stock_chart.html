@@ -81,7 +81,7 @@
         <p>No chart data to display for {{ stock.symbol }}. Try different parameters or check data source.</p>
     {% endif %}
 
-    <p><a href="{% url 'stock_list' %}">Back to Stock List</a></p>
+    <p><a href="{% url 'researchers:stock_list' %}">Back to Stock List</a></p>
 
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script>
