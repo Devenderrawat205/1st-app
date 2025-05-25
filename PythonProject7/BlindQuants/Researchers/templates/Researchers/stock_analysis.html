@@ -1,0 +1,37 @@
+{% extends "Researchers/base.html" %}
+{% block content %}
+<div class="row">
+  <div class="col-md-8">
+    <h2>{{ stock.symbol }} Chart</h2>
+    {% if plot_div %}
+      <div id="chart"></div>
+      <script>
+        var plotly_data = {{ plot_div|safe }};
+        Plotly.newPlot('chart', plotly_data.data, plotly_data.layout);
+      </script>
+    {% endif %}
+    <div class="error-message">{{ error_message }}</div>
+    <!-- Drawing tools UI can go here -->
+  </div>
+  <div class="col-md-4">
+    <ul class="nav nav-tabs" id="sideTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="backtest-tab" data-bs-toggle="tab" data-bs-target="#backtest" type="button" role="tab">Backtest</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="indicators-tab" data-bs-toggle="tab" data-bs-target="#indicators" type="button" role="tab">Indicators</button>
+      </li>
+      <!-- Add more tabs for Drawing, Coding, etc. -->
+    </ul>
+    <div class="tab-content" id="sideTabsContent">
+      <div class="tab-pane fade show active" id="backtest" role="tabpanel">
+        {% include "Researchers/backtest_form.html" %}
+      </div>
+      <div class="tab-pane fade" id="indicators" role="tabpanel">
+        <!-- Indicator selection form, update chart via AJAX -->
+      </div>
+      <!-- More tab panes as needed -->
+    </div>
+  </div>
+</div>
+{% endblock %}

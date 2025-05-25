@@ -27,6 +27,29 @@ def stock_list(request):
     context = {'stocks': stocks, 'message': message}
     return render(request, 'Researchers/stock_list.html', context)
 
+# In BlindQuants/Researchers/views.py
+
+def stock_analysis_view(request, stock_symbol):
+    # Chart logic (reuse from stock_chart_view)
+    chart_context = {}
+    try:
+        stock_obj = Stock.objects.get(symbol=stock_symbol.upper())
+        # ... (copy chart logic here, set chart_context['plot_div'], etc.)
+        # For brevity, use your existing chart logic and set chart_context
+    except Exception as e:
+        chart_context['error_message'] = f"Chart error: {str(e)}"
+        stock_obj = None
+
+    # Backtest logic (reuse from run_backtest_view)
+    backtest_context = {}
+    request.GET = request.GET.copy()
+    request.GET['symbol'] = stock_symbol
+    # Call your run_backtest_view logic here, but just get the context, not render
+
+    # Merge contexts
+    context = {**chart_context, **backtest_context, 'stock': stock_obj}
+    return render(request, 'Researchers/stock_analysis.html', context)
+
 # --- Stock Charting View (Enhanced with Plotly) ---
 def stock_chart_view(request, stock_symbol):
     try:
@@ -103,18 +126,14 @@ def stock_chart_view(request, stock_symbol):
                     f"V: {int(row_series['Volume'])}")
             hover_texts.append(text)
 
-        fig.add_trace(go.Candlestick(
+        fig.add_trace(go.Bar(
             x=df.index,
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            name='Price',
-            increasing_line_color='green',
-            decreasing_line_color='red',
-            hoverinfo='x+y+text',  # Show default x,y hover and custom text
-            text=hover_texts  # Assign pre-formatted texts
-        ), row=1, col=1)
+            y=df['Volume'],
+            name='Volume',
+            marker_color=[('rgba(0,128,0,0.5)' if row_data['Close'] >= row_data['Open'] else 'rgba(255,0,0,0.5)')
+                          for index, row_data in df.iterrows()],
+            opacity=0.6
+        ), row=2 if show_volume else 1, col=1)
 
         # SMA
         if show_sma and len(df) > sma_period_chart:
@@ -315,11 +334,18 @@ def save_drawing(request):
 
 # --- Unified Backtesting Form and Results View ---
 def run_backtest_view(request):
-    form = BacktestForm(request.POST or None)
     backtest_results_data = None
     error_message_display = None
-    equity_plot_div = None
-    price_chart_with_signals_plot_div = None
+
+    symbol = request.GET.get('symbol')
+    if request.method == 'GET' and symbol:
+        try:
+            stock_obj = Stock.objects.get(symbol=symbol.upper())
+            form = BacktestForm(initial={'stock': stock_obj})
+        except Stock.DoesNotExist:
+            form = BacktestForm()
+    else:
+        form = BacktestForm(request.POST or None)
 
     if request.method == 'POST' and form.is_valid():
         stock_obj = form.cleaned_data['stock']
@@ -329,16 +355,10 @@ def run_backtest_view(request):
         initial_cash = form.cleaned_data['initial_cash']
         strategy_choice = form.cleaned_data['strategy']
 
-        # Debug logging
-        print("---- FORM CLEANED DATA ----")
-        print(f"strategy_choice: {strategy_choice}")
-        print(f"form.cleaned_data: {form.cleaned_data}")
-
-        # Date Range Validation
+        # Date range validation
         max_allowed_days = None
         limit_message_period = ""
         timeframe_name = dict(TIMEFRAME_CHOICES).get(selected_timeframe, selected_timeframe)
-
         if selected_timeframe in ['5m', '15m', '30m']:
             max_allowed_days = 59
             limit_message_period = "~60 days"
@@ -367,13 +387,9 @@ def run_backtest_view(request):
         elif (end_date_dt - start_date_dt).days < 0:
             error_message_display = "Start date cannot be after end date."
 
-        # Proceed if no validation errors
+        # Strategy parameters
+        params = {}
         if not error_message_display:
-            start_date_str = start_date_dt.strftime('%Y-%m-%d')
-            end_date_str = end_date_dt.strftime('%Y-%m-%d')
-
-            # Strategy Parameters with validation
-            params = {}
             if strategy_choice == 'sma_cross':
                 sma_fast = form.cleaned_data.get('sma_fast_period', 10)
                 sma_slow = form.cleaned_data.get('sma_slow_period', 30)
@@ -427,29 +443,21 @@ def run_backtest_view(request):
                     error_message_display = "Donchian period must be positive."
                 else:
                     params['donchian_strategy'] = {'donchian_period': donchian_period}
+                    context = {
+                        'form': form,
+                        'results': backtest_results_data,
+                        'error_message_from_view': error_message_display,
+                        'symbol': symbol
+                    }
 
-            if error_message_display:
-                context = {
-                    'form': form,
-                    'results': backtest_results_data,
-                    'error_message_from_view': error_message_display
-                }
-                print_final_context_for_debug(context)
-                return render(request, 'Researchers/backtest_form.html', context)
-
-            active_params = params[strategy_choice]
-            print("---- ACTIVE PARAMS ----")
-            print(f"active_params: {active_params}")
-
+        # If no validation errors, run backtest
+        if not error_message_display:
             try:
-                # Validate parameters
-                for key, value in active_params.items():
-                    if isinstance(value, (int, float)) and value <= 0:
-                        raise ValueError(f"Parameter {key} must be positive")
-
+                start_date_str = start_date_dt.strftime('%Y-%m-%d')
+                end_date_str = end_date_dt.strftime('%Y-%m-%d')
+                active_params = params[strategy_choice]
                 df = yf.download(stock_obj.symbol, start=start_date_str, end=end_date_str,
                                  interval=selected_timeframe, progress=False)
-
                 if df.empty:
                     error_message_display = f'No data found for {stock_obj.symbol} ({dict(TIMEFRAME_CHOICES).get(selected_timeframe)}).'
                 else:
@@ -460,7 +468,6 @@ def run_backtest_view(request):
                     df.rename(columns=rename_map, inplace=True)
                     bt_needed_cols = ['open', 'high', 'low', 'close', 'volume']
                     missing_cols = [col for col in bt_needed_cols if col not in df.columns]
-
                     if missing_cols:
                         error_message_display = f"Data for {stock_obj.symbol} missing columns: {', '.join(missing_cols)}."
                     else:
@@ -477,8 +484,7 @@ def run_backtest_view(request):
                         elif strategy_choice == 'donchian_strategy':
                             min_data_needed = active_params['donchian_period']
                         else:
-                            raise ValueError(f"Unknown strategy: {strategy_choice}")
-
+                            min_data_needed = 30
                         if len(df_bt) < min_data_needed + 30:
                             error_message_display = (
                                 f"Data length ({len(df_bt)}) for {stock_obj.symbol} insufficient "
@@ -492,7 +498,6 @@ def run_backtest_view(request):
                             data_feed = bt.feeds.PandasData(dataname=df_bt)
                             cerebro.adddata(data_feed)
                             cerebro.addsizer(bt.sizers.PercentSizer, percents=90)
-
                             strategy_map = {
                                 'sma_cross': SmaCross,
                                 'rsi_strategy': RsiStrategy,
@@ -503,13 +508,9 @@ def run_backtest_view(request):
                             cerebro.addstrategy(strategy_map[strategy_choice], **active_params)
                             cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name='trade_analyzer')
                             cerebro.addanalyzer(bt.analyzers.PyFolio, _name='pyfolio')
-
-                            print(f'Starting Portfolio: {initial_cash:.2f} for {stock_obj.symbol} ({strategy_choice})')
                             results = cerebro.run()
                             strat_instance = results[0]
                             final_value = cerebro.broker.getvalue()
-                            print(f'Final Portfolio: {final_value:.2f}')
-
                             trade_analysis = strat_instance.analyzers.trade_analyzer.get_analysis()
                             closed_trades = strat_instance.closed_trades if hasattr(strat_instance, 'closed_trades') else []
                             trade_stats = {
@@ -520,7 +521,6 @@ def run_backtest_view(request):
                                 'max_loss_trade': abs(trade_analysis.get('lost', {}).get('pnl', {}).get('max', 0.0)),
                                 'pnl_net': trade_analysis.get('pnl', {}).get('net', {}).get('total', 0.0)
                             }
-
                             processed_trades = []
                             current_balance = initial_cash
                             for idx, trade in enumerate(closed_trades):
@@ -531,11 +531,12 @@ def run_backtest_view(request):
                                     'trade_number': idx + 1,
                                     'running_balance': current_balance
                                 })
-
                             portfolio_stats = strat_instance.analyzers.pyfolio.get_analysis()
                             raw_returns = portfolio_stats.get('returns', {})
                             report_metrics = {}
                             returns_series = None
+                            equity_plot_div = None
+                            price_chart_with_signals_plot_div = None
                             if raw_returns:
                                 try:
                                     rs = pd.Series(raw_returns)
@@ -550,9 +551,7 @@ def run_backtest_view(request):
                                             'annual_volatility': qs.stats.volatility(rs, annualize=True) * 100
                                         }
                                 except Exception as e_qs:
-                                    print(f"QuantStats Error: {e_qs}")
                                     report_metrics = {'error': 'Metrics calculation error'}
-
                             if returns_series is not None and not returns_series.empty:
                                 eq_data = (1 + returns_series).cumprod() * initial_cash
                                 fig_eq = go.Figure()
@@ -570,7 +569,6 @@ def run_backtest_view(request):
                                     margin=dict(l=50, r=50, t=50, b=50)
                                 )
                                 equity_plot_div = fig_eq.to_json()
-
                             if not df_bt.empty:
                                 fig_price = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
                                 fig_price.add_trace(go.Candlestick(
@@ -590,53 +588,6 @@ def run_backtest_view(request):
                                     marker_color=['green' if row['close'] >= row['open'] else 'red' for _, row in df_bt.iterrows()],
                                     opacity=0.5
                                 ), row=2, col=1)
-
-                                # Add strategy-specific indicators
-                                if strategy_choice == 'sma_cross' and len(df_bt['close']) > max(active_params['pfast'], active_params['pslow']):
-                                    fig_price.add_trace(go.Scatter(
-                                        x=df_bt.index,
-                                        y=talib.SMA(df_bt['close'], timeperiod=active_params['pfast']),
-                                        name=f'SMA({active_params["pfast"]})',
-                                        line=dict(width=1.5, color='orange')
-                                    ), row=1, col=1)
-                                    fig_price.add_trace(go.Scatter(
-                                        x=df_bt.index,
-                                        y=talib.SMA(df_bt['close'], timeperiod=active_params['pslow']),
-                                        name=f'SMA({active_params["pslow"]})',
-                                        line=dict(width=1.5, color='purple')
-                                    ), row=1, col=1)
-                                elif strategy_choice == 'bb_strategy' and len(df_bt['close']) > active_params['bb_period']:
-                                    upper, middle, lower = talib.BBANDS(
-                                        df_bt['close'],
-                                        timeperiod=active_params['bb_period'],
-                                        nbdevup=active_params['bb_devfactor'],
-                                        nbdevdn=active_params['bb_devfactor']
-                                    )
-                                    fig_price.add_trace(go.Scatter(x=df_bt.index, y=upper, name='BB Up', line=dict(color='rgba(100,100,200,0.5)', width=0.7)), row=1, col=1)
-                                    fig_price.add_trace(go.Scatter(x=df_bt.index, y=middle, name='BB Mid', line=dict(color='rgba(100,100,200,0.7)', width=1, dash='dash')), row=1, col=1)
-                                    fig_price.add_trace(go.Scatter(x=df_bt.index, y=lower, name='BB Low', line=dict(color='rgba(100,100,200,0.5)', width=0.7)), row=1, col=1)
-                                elif strategy_choice == 'rsi_strategy' and len(df_bt['close']) > active_params['rsi_period']:
-                                    rsi = talib.RSI(df_bt['close'], timeperiod=active_params['rsi_period'])
-                                    fig_price.add_trace(go.Scatter(
-                                        x=df_bt.index,
-                                        y=rsi,
-                                        name=f'RSI({active_params["rsi_period"]})',
-                                        line=dict(width=1.5, color='blue')
-                                    ), row=2, col=1)
-                                    fig_price.add_hline(y=active_params['rsi_upper'], line_dash="dash", line_color="red", annotation_text="Overbought", row=2, col=1)
-                                    fig_price.add_hline(y=active_params['rsi_lower'], line_dash="dash", line_color="green", annotation_text="Oversold", row=2, col=1)
-                                    fig_price.update_yaxes(title_text="RSI", range=[0, 100], row=2, col=1)
-                                elif strategy_choice == 'macd_strategy' and len(df_bt['close']) > active_params['macd_slow'] + active_params['macd_signal']:
-                                    macd_line, signal_line, _ = talib.MACD(
-                                        df_bt['close'],
-                                        fastperiod=active_params['macd_fast'],
-                                        slowperiod=active_params['macd_slow'],
-                                        signalperiod=active_params['macd_signal']
-                                    )
-                                    fig_price.add_trace(go.Scatter(x=df_bt.index, y=macd_line, name='MACD', line=dict(width=1.5, color='teal')), row=2, col=1)
-                                    fig_price.add_trace(go.Scatter(x=df_bt.index, y=signal_line, name='Signal', line=dict(width=1.5, color='magenta')), row=2, col=1)
-                                    fig_price.update_yaxes(title_text="MACD", row=2, col=1)
-
                                 # Add trade signals
                                 buy_sd, buy_sp, sell_sd, sell_sp = [], [], [], []
                                 for trade in processed_trades:
@@ -648,9 +599,7 @@ def run_backtest_view(request):
                                             sell_sd.append(pd.to_datetime(trade['date_out']))
                                             sell_sp.append(trade['price_out'])
                                     except (ValueError, TypeError):
-                                        print(f"Plot signal date parse error: {trade}")
                                         continue
-
                                 if buy_sd:
                                     fig_price.add_trace(go.Scatter(
                                         x=buy_sd,
@@ -667,38 +616,22 @@ def run_backtest_view(request):
                                         name='Sell',
                                         marker=dict(color='red', size=10, symbol='triangle-down')
                                     ), row=1, col=1)
-
                                 fig_price.update_layout(
                                     template='plotly_white',
                                     title_text=f'{stock_obj.symbol} Price Chart & Signals ({dict(STRATEGY_CHOICES).get(strategy_choice)})',
                                     height=800,
                                     xaxis_rangeslider_visible=False,
-                                    xaxis=dict(
-                                        rangeselector=dict(
-                                            buttons=[
-                                                dict(count=1, label="1m", step="month", stepmode="backward"),
-                                                dict(count=6, label="6m", step="month", stepmode="backward"),
-                                                dict(count=1, label="1y", step="year", stepmode="backward"),
-                                                dict(step="all", label="All")
-                                            ]
-                                        ),
-                                        type="date",
-                                        tickformat="%Y-%m-%d"
-                                    ),
-                                    yaxis=dict(title='Price ($)', tickformat=".2f"),
                                     margin=dict(l=50, r=50, t=50, b=50),
                                     showlegend=True
                                 )
                                 fig_price.update_yaxes(title_text="Volume", row=2, col=1)
                                 price_chart_with_signals_plot_div = fig_price.to_json()
-
                             download_params_str = (
                                 f"?symbol={stock_obj.symbol}&start={start_date_str}&end={end_date_str}"
                                 f"&strategy={strategy_choice}&cash={initial_cash}&timeframe={selected_timeframe}"
                             )
                             for p_name, p_val in active_params.items():
                                 download_params_str += f"&{p_name}={p_val}"
-
                             backtest_results_data = {
                                 'stock': stock_obj,
                                 'initial_cash': initial_cash,
@@ -713,21 +646,18 @@ def run_backtest_view(request):
                                 'price_chart_with_signals_plot_div': price_chart_with_signals_plot_div
                             }
             except Exception as e:
-                print(f"Backtest Error for {stock_obj.symbol}: {str(e)}")
-                traceback.print_exc()
                 error_message_display = f"Error during backtest: {str(e)}"
     elif request.method == 'POST':
         error_message_display = "Form data invalid. Please correct the errors."
-        print(f"Form Errors: {form.errors.as_json()}")
 
     context = {
         'form': form,
         'results': backtest_results_data,
-        'error_message_from_view': error_message_display
+        'error_message_from_view': error_message_display,
+        'symbol': symbol
     }
     print_final_context_for_debug(context)
     return render(request, 'Researchers/backtest_form.html', context)
-
 # --- Helper function for debugging context ---
 def print_final_context_for_debug(context):
     print("\n---- FINAL CONTEXT FOR TEMPLATE (run_backtest_view) ----")
@@ -810,6 +740,7 @@ def download_backtest_excel(request):
         df_excel['openinterest'] = 0
         cerebro = bt.Cerebro(stdstats=False)
         cerebro.broker.setcash(initial_cash)
+        symbol = stock_obj.symbol
         data_feed = bt.feeds.PandasData(dataname=df_excel)
         cerebro.adddata(data_feed)
 

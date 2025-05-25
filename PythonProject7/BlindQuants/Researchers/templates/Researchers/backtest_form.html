@@ -3,6 +3,100 @@
 {% block title %}Run Backtest - Trading App{% endblock %}
 
 {% block content %}
+<!-- Add this at the top of your backtest_form.html -->
+<div class="search-container" style="margin-bottom: 20px;">
+  <input type="text" id="symbolSearch" placeholder="Change symbol..." autocomplete="off"/>
+  <div id="symbolSuggestions" class="suggestion-list" style="display: none;"></div>
+</div>
+
+<script>
+const symbolMap = [
+  { name: "Apple", symbol: "AAPL" },
+  { name: "Tesla", symbol: "TSLA" },
+  { name: "Microsoft", symbol: "MSFT" },
+  { name: "Amazon", symbol: "AMZN" },
+  { name: "Google", symbol: "GOOGL" },
+  { name: "Meta", symbol: "META" },
+  { name: "Nifty 50", symbol: "NIFTY" },
+  { name: "USD INR", symbol: "USDINR" }
+];
+
+function filterSymbols(query) {
+  query = query.trim().toLowerCase();
+  if (!query) return [];
+  return symbolMap.filter(item =>
+    item.name.toLowerCase().includes(query) ||
+    item.symbol.toLowerCase().includes(query)
+  );
+}
+
+const symbolInput = document.getElementById('symbolSearch');
+const suggestionList = document.getElementById('symbolSuggestions');
+let currentSuggestions = [];
+let selectedIndex = -1;
+
+function openBacktest(symbol) {
+  if (symbol) {
+    window.open('/analysis/' + encodeURIComponent(symbol) + '/', '_blank');
+  }
+}
+
+symbolInput.addEventListener('input', function() {
+  const val = symbolInput.value;
+  currentSuggestions = filterSymbols(val);
+  suggestionList.innerHTML = '';
+  selectedIndex = -1;
+  if (currentSuggestions.length > 0) {
+    suggestionList.style.display = 'block';
+    currentSuggestions.forEach((item, idx) => {
+      const div = document.createElement('div');
+      div.className = 'suggestion-item';
+      div.textContent = `${item.name} (${item.symbol})`;
+      div.onclick = () => openBacktest(item.symbol);
+      suggestionList.appendChild(div);
+    });
+  } else {
+    suggestionList.style.display = 'none';
+  }
+});
+
+symbolInput.addEventListener('keydown', function(e) {
+  if (!currentSuggestions.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    selectedIndex = (selectedIndex + 1) % currentSuggestions.length;
+    updateSuggestionSelection();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    selectedIndex = (selectedIndex - 1 + currentSuggestions.length) % currentSuggestions.length;
+    updateSuggestionSelection();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (selectedIndex >= 0) {
+      openBacktest(currentSuggestions[selectedIndex].symbol);
+    } else if (currentSuggestions.length === 1) {
+      openBacktest(currentSuggestions[0].symbol);
+    }
+  }
+});
+
+function updateSuggestionSelection() {
+  const items = suggestionList.querySelectorAll('.suggestion-item');
+  items.forEach((item, i) => {
+    if (i === selectedIndex) item.classList.add('selected');
+    else item.classList.remove('selected');
+  });
+}
+
+document.addEventListener('click', function(e) {
+  if (!symbolInput.contains(e.target) && !suggestionList.contains(e.target)) {
+    suggestionList.style.display = 'none';
+  }
+});
+symbolInput.addEventListener('focus', function() {
+  if (currentSuggestions.length) suggestionList.style.display = 'block';
+});
+</script>
     <style>
         /* Basic styles - consider moving to a separate CSS file */
         table { width: 90%; margin: 20px auto; border-collapse: collapse; font-size: 0.9em; }
@@ -43,6 +137,7 @@
 
     <form method="post" id="backtestForm">
         {% csrf_token %}
+        <input type="hidden" name="symbol" value="{{ symbol }}">
         <div class="form-field">{{ form.stock.label_tag }} {{ form.stock }} <span class="form-errors">{{ form.stock.errors }}</span></div>
         <div class="form-field">{{ form.start_date.label_tag }} {{ form.start_date }} <span class="form-errors">{{ form.start_date.errors }}</span></div>
         <div class="form-field">{{ form.end_date.label_tag }} {{ form.end_date }} <span class="form-errors">{{ form.end_date.errors }}</span></div>
@@ -110,7 +205,7 @@
             <div class="results-section">
                 <h2>Summary</h2>
                 <table>
-                    <tr><th>Stock:</th><td>{{ results.stock.symbol }}</td></tr>
+                    <tr><th>Stock:</th><td>{{ symbol|default:results.stock.symbol }}</td></tr>
                     <tr><th>Timeframe Used:</th><td>{{ results.timeframe_used|default:"N/A" }}</td></tr>
                     <tr><th>Strategy:</th><td>{{ results.strategy_name }}</td></tr>
                     <tr><th>Initial Cash:</th><td>${{ results.initial_cash|floatformat:2 }}</td></tr>
@@ -184,7 +279,7 @@
     {% endif %}
 
     <hr style="margin-top:30px;">
-    <p><a href="{% url 'stock_list' %}">Back to Stock List</a></p>
+    <p><a href="{% url 'researchers:stock_list' %}">Back to Stock List</a></p>
     <div class="notes" style="margin-top: 30px; font-style: italic; color: #555;">
         <h3>Notes:</h3>
         <p>Advanced options require specific data. CSS can improve appearance.</p>

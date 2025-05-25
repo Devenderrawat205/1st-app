@@ -1,121 +1,182 @@
 {% extends 'Researchers/base.html' %}
 {% block content %}
 
-<!-- Set background image (adjust the image path if needed) -->
 <style>
 body {
-  background: url('/static/images/market-bg.jpg') no-repeat center center fixed;
+  background: url('/static/images/no image') no-repeat center center fixed;
   background-size: cover;
   margin: 0;
   padding: 0;
   min-height: 100vh;
 }
-.center-bar-container {
+.center-search-container {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 80vh;a
+  min-height: 80vh;
 }
-.blank-bar {
-  width: 400px;
-  height: 60px;
+.search-bar {
   background: rgba(0,0,0,0.55);
   border-radius: 20px;
   box-shadow: 0 4px 30px rgba(0,0,0,0.2);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-.blank-bar:hover {
-  background: rgba(0,0,0,0.75);
-}
-.modal-bg {
-  display: none;
-  position: fixed;
-  left: 0; top: 0; width: 100vw; height: 100vh;
-  background: rgba(0,0,0,0.6);
-  z-index: 1000;
-  align-items: center;
-  justify-content: center;
-}
-.modal {
-  background: #222;
-  color: #fff;
-  padding: 2em 2em 1.5em 2em;
-  border-radius: 16px;
-  min-width: 320px;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+  padding: 24px 32px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  min-width: 340px;
+  transition: box-shadow 0.2s;
 }
-.modal input[type="text"] {
-  padding: 10px;
-  border-radius: 6px;
-  border: none;
-  width: 200px;
-  margin-bottom: 1em;
-  font-size: 1.1em;
+.search-bar:focus-within {
+  box-shadow: 0 8px 40px rgba(25,181,254,0.4);
 }
-.modal button {
-  padding: 8px 18px;
-  border-radius: 6px;
+#symbolInput {
+  padding: 14px 18px;
+  border-radius: 10px;
   border: none;
-  background: #19b5fe;
-  color: #fff;
-  font-size: 1.1em;
-  cursor: pointer;
-  margin-bottom: 8px;
+  width: 260px;
+  font-size: 1.15em;
+  outline: none;
+  margin-bottom: 0;
+  box-shadow: 0 2px 8px rgba(25,181,254,0.08);
+  transition: box-shadow 0.2s;
 }
-.close-btn {
-  background: transparent;
-  color: #fff;
-  border: none;
-  font-size: 1.3em;
+#symbolInput:focus {
+  box-shadow: 0 4px 16px rgba(25,181,254,0.18);
+}
+.suggestion-list {
   position: absolute;
-  top: 16px;
-  right: 24px;
+  top: 54px;
+  left: 0;
+  right: 0;
+  background: #333;
+  border-radius: 0 0 10px 10px;
+  max-height: 180px;
+  overflow-y: auto;
+  z-index: 10;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+}
+.suggestion-item {
+  padding: 12px 20px;
   cursor: pointer;
+  color: #fff;
+  font-size: 1.08em;
+  transition: background 0.15s;
+}
+.suggestion-item.selected,
+.suggestion-item:hover {
+  background: #19b5fe;
+}
+.search-container {
+  width: 100%;
+  position: relative;
 }
 </style>
 
-<div class="center-bar-container">
-  <div class="blank-bar" id="openModal"></div>
-</div>
-
-<div class="modal-bg" id="modalBg">
-  <div class="modal" style="position: relative;">
-    <button class="close-btn" id="closeModal">&times;</button>
-    <div style="margin-bottom: 10px; font-size: 1.2em;">Search Symbol</div>
-    <input type="text" id="symbolInput" placeholder="Type symbol (e.g. AAPL)" autofocus autocomplete="off"/>
-    <button onclick="openBacktest()">Open Backtest & Chart</button>
+<div class="center-search-container">
+  <div class="search-bar">
+    <div class="search-container">
+      <input type="text" id="symbolInput" placeholder="Type company or symbol..." autofocus autocomplete="off"/>
+      <div id="suggestionList" class="suggestion-list" style="display: none;"></div>
+    </div>
   </div>
 </div>
 
 <script>
-document.getElementById('openModal').onclick = function() {
-  document.getElementById('modalBg').style.display = 'flex';
-  setTimeout(function() {
-    document.getElementById('symbolInput').focus();
-  }, 100);
-};
-document.getElementById('closeModal').onclick = function() {
-  document.getElementById('modalBg').style.display = 'none';
-};
-function openBacktest() {
-  var symbol = document.getElementById('symbolInput').value.trim();
-  if(symbol) {
-    // Open new window with backtest for the symbol
-    window.open('/backtest/?symbol=' + encodeURIComponent(symbol), '_blank');
-    document.getElementById('modalBg').style.display = 'none';
-    document.getElementById('symbolInput').value = '';
-  } else {
-    alert('Please enter a symbol');
+// Example dictionary for symbol search (expand as needed)
+const symbolMap = [
+  { name: "Apple", symbol: "AAPL" },
+  { name: "Tesla", symbol: "TSLA" },
+  { name: "Microsoft", symbol: "MSFT" },
+  { name: "Amazon", symbol: "AMZN" },
+  { name: "Google", symbol: "GOOGL" },
+  { name: "Meta", symbol: "META" },
+  { name: "Nifty 50", symbol: "NIFTY" },
+  { name: "USD INR", symbol: "USDINR" }
+  // Add more as needed!
+];
+
+function filterSymbols(query) {
+  query = query.trim().toLowerCase();
+  if (!query) return [];
+  return symbolMap.filter(item =>
+    item.name.toLowerCase().includes(query) ||
+    item.symbol.toLowerCase().includes(query)
+  );
+}
+
+const symbolInput = document.getElementById('symbolInput');
+const suggestionList = document.getElementById('suggestionList');
+
+let selectedIndex = -1;
+let currentSuggestions = [];
+let debounceTimeout;
+
+function openAnalysis(symbol) {
+  if (symbol) {
+    window.open('/analysis/' + encodeURIComponent(symbol) + '/', '_blank');
+    symbolInput.value = '';
+    suggestionList.style.display = 'none';
   }
 }
-document.getElementById('symbolInput').addEventListener('keydown', function(e) {
-  if(e.key === 'Enter') {
-    openBacktest();
+
+symbolInput.addEventListener('input', function() {
+  clearTimeout(debounceTimeout);
+  debounceTimeout = setTimeout(() => {
+    const val = symbolInput.value;
+    currentSuggestions = filterSymbols(val);
+    suggestionList.innerHTML = '';
+    selectedIndex = -1;
+    if (currentSuggestions.length > 0) {
+      suggestionList.style.display = 'block';
+      currentSuggestions.forEach((item, idx) => {
+        const div = document.createElement('div');
+        div.className = 'suggestion-item';
+        div.textContent = `${item.name} (${item.symbol})`;
+        div.onclick = () => openAnalysis(item.symbol);
+        suggestionList.appendChild(div);
+      });
+    } else {
+      suggestionList.style.display = 'none';
+    }
+  }, 300); // 300ms debounce
+});
+
+symbolInput.addEventListener('keydown', function(e) {
+  if (!currentSuggestions.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    selectedIndex = (selectedIndex + 1) % currentSuggestions.length;
+    updateSuggestionSelection();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    selectedIndex = (selectedIndex - 1 + currentSuggestions.length) % currentSuggestions.length;
+    updateSuggestionSelection();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (selectedIndex >= 0) {
+      openAnalysis(currentSuggestions[selectedIndex].symbol);
+    } else if (currentSuggestions.length === 1) {
+      openAnalysis(currentSuggestions[0].symbol);
+    }
   }
+});
+
+function updateSuggestionSelection() {
+  const items = suggestionList.querySelectorAll('.suggestion-item');
+  items.forEach((item, i) => {
+    if (i === selectedIndex) item.classList.add('selected');
+    else item.classList.remove('selected');
+  });
+}
+
+// Hide suggestions when clicking outside
+document.addEventListener('click', function(e) {
+  if (!symbolInput.contains(e.target) && !suggestionList.contains(e.target)) {
+    suggestionList.style.display = 'none';
+  }
+});
+symbolInput.addEventListener('focus', function() {
+  if (currentSuggestions.length) suggestionList.style.display = 'block';
 });
 </script>
 
